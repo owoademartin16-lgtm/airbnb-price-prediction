@@ -1,17 +1,13 @@
 """Amsterdam Airbnb Price Predictor — CatBoost Streamlit frontend.
 
-Light-only interface with sidebar inputs. Estimates a listing's nightly
-price with a trained CatBoostRegressor. The target was square-root
-transformed in training, so raw predictions are squared back to currency.
-Artifacts live beside this script:
+Estimates a listing's nightly price with a trained CatBoostRegressor.
+The target was square-root transformed in training, so raw predictions
+are squared back to currency. Artifacts live beside this script:
 
 - airbnb_catboost_model.joblib (CatBoostRegressor, 24 features)
 - neighbourhood_encoding_lookup.pkl (neighbourhood -> encoded value)
 - global_mean_price.pkl (fallback for unseen neighbourhoods)
 - room_type_encoder.pkl (optional; direct one-hot fallback if absent)
-
-The light theme is pinned in `.streamlit/config.toml`, and every color
-below is declared explicitly so browser/OS dark mode cannot alter it.
 
 Run with::
 
@@ -19,6 +15,7 @@ Run with::
 """
 
 import joblib
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -62,199 +59,98 @@ st.set_page_config(
 )
 
 # ------------------------------------------------------------------
-# Custom CSS — light-only design system.
-# Every color is explicit; no dark-mode rules, no color-scheme
-# detection, so the app renders identically in any browser theme.
+# Custom CSS — warm coral theme
 # ------------------------------------------------------------------
 st.markdown(
     """
     <style>
-    :root { color-scheme: light; }
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
     html, body, [class*="css"] {
         font-family: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-        background-color: #F7F7F7;
-        color: #222222;
     }
-    #MainMenu { visibility: hidden; }
-    footer { visibility: hidden; }
-    header { visibility: hidden; }
+    [data-testid="stAppViewContainer"] { background: #FAFAFA; }
+    [data-testid="stSidebar"] { background: #FFFFFF; }
 
-    [data-testid="stAppViewContainer"] { background-color: #F7F7F7; }
-    .block-container {
-        background-color: #F7F7F7;
-        padding-top: 1.5rem;
-        padding-bottom: 2rem;
-    }
-
-    /* ---------- Sidebar: white, dark text, subtle border ---------- */
-    [data-testid="stSidebar"] {
-        background-color: #FFFFFF;
-        border-right: 1px solid #E5E5E5;
-    }
-    [data-testid="stSidebar"] h2 { color: #222222; }
-    [data-testid="stSidebar"] details summary p {
-        font-weight: 700; color: #222222;
-    }
-    [data-testid="stSidebar"] [data-testid="stExpander"] {
-        background-color: #FFFFFF;
-        border: 1px solid #E5E5E5;
-        border-radius: 12px;
-    }
-
-    /* ---------- Sidebar light scrollbar (track/thumb/hover) ---------- */
-    [data-testid="stSidebar"] { scrollbar-width: thin;
-        scrollbar-color: #C9C5BC #F1EFEA; }
-    [data-testid="stSidebar"] ::-webkit-scrollbar { width: 10px; }
-    [data-testid="stSidebar"] ::-webkit-scrollbar-track {
-        background: #F1EFEA; border-radius: 8px;
-    }
-    [data-testid="stSidebar"] ::-webkit-scrollbar-thumb {
-        background: #C9C5BC; border-radius: 8px;
-        border: 2px solid #F1EFEA; background-clip: padding-box;
-        min-height: 40px;
-    }
-    [data-testid="stSidebar"] ::-webkit-scrollbar-thumb:hover {
-        background: #A8A39A;
-        border: 2px solid #F1EFEA; background-clip: padding-box;
-    }
-
-    /* ---------- Header ---------- */
     .badge {
-        display: inline-block; background: #222222; color: #FF5A5F;
-        font-size: 0.72rem; font-weight: 700; letter-spacing: 0.12em;
+        display: inline-block; background: #1a1a1a; color: #FF5A5F;
+        font-size: 0.8rem; font-weight: 700; letter-spacing: 0.08em;
         text-transform: uppercase; padding: 0.3rem 0.9rem;
-        border-radius: 999px; margin-bottom: 0.4rem;
+        border-radius: 999px; margin-bottom: 0.5rem;
     }
-    .page-title { font-size: 2rem; font-weight: 800; color: #222222;
-        margin: 0; }
-    .page-sub { color: #666666; font-size: 1rem; margin-top: 0.3rem;
-        max-width: 64ch; }
+    .subtitle { color: #555; font-size: 1.05rem; margin-top: -0.5rem; }
 
-    /* ---------- Cards ---------- */
-    .card {
-        background-color: #FFFFFF;
-        border: 1px solid #E5E5E5;
+    /* Primary buttons: coral with white text */
+    div.stButton > button[kind="primary"] {
+        background-color: #FF5A5F;
+        color: #fff;
+        border: none;
+        font-weight: 700;
+        font-size: 1.05rem;
         border-radius: 12px;
-        padding: 1.25rem 1.5rem;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-        margin-bottom: 1rem;
+        padding: 0.8rem 1.2rem;
+        width: 100%;
+        box-shadow: 0 4px 12px rgba(255, 90, 95, 0.35);
     }
-    .card-title { font-size: 1.15rem; font-weight: 700; color: #222222;
-        margin: 0 0 0.5rem; }
-
-    /* ---------- Inputs: white fields, dark text, gray borders ---------- */
-    [data-testid="stWidgetLabel"] p { color: #222222; font-weight: 600; }
-    [data-testid="stCheckbox"] label p { color: #222222; }
-    [data-testid="stNumberInput"] input,
-    [data-testid="stTextInput"] input {
-        background-color: #FFFFFF; color: #222222;
-        border-radius: 8px;
-    }
-    [data-testid="stSelectbox"] div[data-baseweb="select"] > div,
-    [data-testid="stMultiSelect"] div[data-baseweb="select"] > div {
-        background-color: #FFFFFF; color: #222222;
-        border-radius: 8px;
-    }
-    [data-testid="stSelectbox"] span,
-    [data-testid="stMultiSelect"] span { color: #222222; }
-    div[data-baseweb="popover"] { border-radius: 10px; overflow: hidden;
-        border: 1px solid #E5E5E5; background-color: #FFFFFF; }
-    ul[role="listbox"] { background-color: #FFFFFF; }
-    ul[role="listbox"] li { color: #222222; }
-    ul[role="listbox"] li:hover { background-color: #F2F2F2; }
-    [data-testid="stCaptionContainer"] { color: #666666; }
-    input:focus-visible, button:focus-visible,
-    div[data-baseweb="select"]:focus-within {
-        outline: 2px solid #FF5A5F; outline-offset: 2px;
+    div.stButton > button[kind="primary"]:hover {
+        background-color: #E0484D;
+        color: #fff;
     }
 
-    /* ---------- Estimate button ---------- */
-    div.stButton > button {
-        background-color: #FF5A5F; color: #FFFFFF; border: none;
-        font-weight: 700; font-size: 1.05rem; border-radius: 12px;
-        padding: 0.75rem 1.2rem; width: 100%;
-        box-shadow: 0 4px 12px rgba(255, 90, 95, 0.30);
-        transition: background-color 0.12s ease, transform 0.12s ease,
-            box-shadow 0.12s ease;
-    }
-    div.stButton > button:hover {
-        background-color: #D63E43; color: #FFFFFF;
-        transform: translateY(-1px);
-        box-shadow: 0 6px 14px rgba(255, 90, 95, 0.35);
-    }
-    div.stButton > button:active { transform: translateY(0); }
-    div.stButton > button:disabled {
-        opacity: 0.55; cursor: not-allowed; transform: none;
-    }
-
-    /* ---------- Result focal card (flat white, coral accent) ---------- */
-    .result-card {
-        background-color: #FFFFFF;
-        border: 1px solid #E5E5E5;
-        border-left: 8px solid #FF5A5F;
-        border-radius: 12px;
-        padding: 1.5rem;
-        text-align: center;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-    }
-    .result-card .label {
-        font-size: 0.78rem; font-weight: 700; letter-spacing: 0.12em;
-        text-transform: uppercase; color: #666666;
-    }
-    .result-card .value {
-        font-size: clamp(2.4rem, 5vw, 3.2rem);
-        font-weight: 800; color: #FF5A5F; margin: 0.1rem 0; line-height: 1.1;
-    }
-    .result-card .pernight { color: #666666; font-size: 1rem; }
-    .result-card .note { color: #666666; font-size: 0.9rem; margin-top: 0.5rem; }
-
-    /* ---------- KPI metrics ---------- */
+    /* KPI metric cards */
     [data-testid="stMetric"] {
-        background-color: #FFFFFF; border: 1px solid #E5E5E5;
-        border-left: 5px solid #FF5A5F; border-radius: 12px;
-        padding: 0.9rem 1.1rem; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-        color: #222222;
+        background: #ffffff;
+        border: 1px solid #DDDDDD;
+        border-left: 5px solid #FF5A5F;
+        border-radius: 12px;
+        padding: 1rem 1.25rem;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
     }
 
-    /* ---------- Compact empty state ---------- */
+    /* Hero price centerpiece */
+    .hero-price {
+        background: linear-gradient(135deg, #1F2937 0%, #111827 100%);
+        border-radius: 16px;
+        padding: 1.75rem 2rem;
+        color: #fff;
+        text-align: center;
+        box-shadow: 0 8px 24px rgba(17, 24, 39, 0.25);
+        margin-bottom: 1.25rem;
+    }
+    .hero-price .label {
+        font-size: 0.8rem;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: #FDA4AF;
+    }
+    .hero-price .value {
+        font-size: 3rem;
+        font-weight: 800;
+        margin: 0.1rem 0;
+    }
+    .hero-price .range {
+        color: #D1D5DB;
+        font-size: 0.95rem;
+    }
+
+    /* Empty state */
     .empty-state {
-        background-color: #FFFFFF; border: 1px dashed #E5E5E5;
-        border-radius: 12px; padding: 1.5rem 1.25rem; text-align: center;
-        color: #666666;
+        background: #FFFFFF;
+        border: 1px dashed #DDDDDD;
+        border-radius: 16px;
+        padding: 2.5rem 2rem;
+        text-align: center;
+        color: #717171;
     }
-    .empty-state .icon { font-size: 1.8rem; }
-    .empty-state h3 { color: #222222; margin: 0.3rem 0; font-size: 1.1rem; }
-    .empty-state p { margin: 0; font-size: 0.92rem; }
-
-    /* ---------- Alerts & dividers ---------- */
-    [data-testid="stAlert"] { border-radius: 12px; }
-    hr { border: none; border-top: 1px solid #E5E5E5; margin: 1rem 0; }
-
-    /* ---------- Page scrollbar (light, visible) ---------- */
-    ::-webkit-scrollbar { width: 10px; height: 10px; }
-    ::-webkit-scrollbar-track { background: #F7F7F7; }
-    ::-webkit-scrollbar-thumb {
-        background: #C9C5BC; border-radius: 8px;
-        border: 2px solid #F7F7F7; background-clip: padding-box;
-        min-height: 40px;
-    }
-    ::-webkit-scrollbar-thumb:hover { background: #A8A39A;
-        border: 2px solid #F7F7F7; background-clip: padding-box; }
-
-    .footer-note { text-align: center; color: #666666; font-size: 0.82rem;
-        margin-top: 1.5rem; }
-
-    @media (max-width: 640px) {
-        .block-container { padding-left: 1rem; padding-right: 1rem; }
-        .page-title { font-size: 1.6rem; }
-    }
+    .empty-state .icon { font-size: 2.4rem; }
+    .empty-state h3 { color: #1a1a1a; margin: 0.4rem 0; }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
 # ------------------------------------------------------------------
-# Artifact loading — unchanged
+# Artifact loading (cached; friendly errors) — unchanged
 # ------------------------------------------------------------------
 @st.cache_resource
 def load_assets():
@@ -353,23 +249,13 @@ def predict_price(input_df):
 
 
 # ------------------------------------------------------------------
-# Header
-# ------------------------------------------------------------------
-st.markdown('<span class="badge">CatBoost &middot; Amsterdam Listings</span>',
-            unsafe_allow_html=True)
-st.title("Amsterdam Airbnb Price Predictor")
-st.write(
-    "Estimate the nightly price of an Airbnb listing based on its "
-    "property details."
-)
-
-# ------------------------------------------------------------------
-# Sidebar inputs (grouped sections) — same widgets and values
+# Sidebar inputs (grouped expanders)
 # ------------------------------------------------------------------
 with st.sidebar:
-    st.header("Listing inputs")
+    st.header("Listing Inputs")
+    st.caption("Adjust the details below, then hit **Estimate Price**.")
 
-    with st.expander("🏠 Property details", expanded=True):
+    with st.expander("🏠 Property Details", expanded=True):
         room_type = st.selectbox("Room type", ROOM_TYPES)
         accommodates = st.number_input("Accommodates", 1, 16, 2)
         bedrooms = st.number_input("Bedrooms", 0, 10, 1)
@@ -389,7 +275,7 @@ with st.sidebar:
         amenities_count = len(selected_amenities)
         st.caption(f"{amenities_count} selected (fed to the model as a count)")
 
-    with st.expander("⭐ Host & reviews"):
+    with st.expander("⭐ Host & Reviews"):
         superhost = st.checkbox("Host is a superhost", value=False)
         verified = st.checkbox("Host identity verified", value=True)
         host_listings_count = st.number_input("Host listings count", 1, 500, 1)
@@ -402,9 +288,17 @@ with st.sidebar:
 # ------------------------------------------------------------------
 # Main panel
 # ------------------------------------------------------------------
+st.markdown('<span class="badge">CatBoost &middot; Amsterdam Listings</span>',
+            unsafe_allow_html=True)
+st.title("Amsterdam Airbnb Price Predictor")
+st.markdown(
+    '<p class="subtitle">Set your listing details in the sidebar and get '
+    "an instant nightly-price estimate.</p>",
+    unsafe_allow_html=True,
+)
 st.divider()
 
-if st.button("Estimate price", type="primary"):
+if st.button("Estimate Price", type="primary"):
     try:
         with st.spinner("Calculating your estimate..."):
             input_df = build_feature_row(
@@ -427,41 +321,30 @@ if "last_price" in st.session_state:
 
     st.markdown(
         f"""
-        <div class="result-card">
+        <div class="hero-price">
             <div class="label">Estimated nightly price</div>
             <p class="value">€{price:,.2f}</p>
-            <div class="pernight">per night</div>
-            <div class="note">Based on the property details provided.</div>
+            <div class="range">€{per_guest:,.2f} per guest &middot; per night</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
-    st.divider()
     k1, k2, k3 = st.columns(3)
-    k1.metric("Estimated price", f"€{price:,.2f}")
-    k2.metric("Price per guest", f"€{per_guest:,.2f}")
-    k3.metric("Model accuracy (R²)", MODEL_R2)
+    k1.metric("Estimated Price", f"€{price:,.2f}")
+    k2.metric("Price per Guest", f"€{per_guest:,.2f}")
+    k3.metric("Model Accuracy (R²)", MODEL_R2)
 else:
     st.markdown(
         """
         <div class="empty-state">
-            <div class="icon">🏠</div>
+            <div class="icon">🏡</div>
             <h3>Ready when you are</h3>
-            <p>Fill in your listing details in the sidebar, then select
-            "Estimate price" to see the estimated nightly price.</p>
+            <p>Fill in your listing details in the sidebar, then press
+            <b>Estimate Price</b> to see the nightly estimate here.</p>
         </div>
         """,
         unsafe_allow_html=True,
     )
-
-# ------------------------------------------------------------------
-# Footer
-# ------------------------------------------------------------------
-st.markdown(
-    '<div class="footer-note">Amsterdam Airbnb Price Predictor · '
-    "CatBoost · Built with Streamlit</div>",
-    unsafe_allow_html=True,
-)
 
 
 # ------------------------------------------------------------------
