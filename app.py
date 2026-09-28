@@ -49,7 +49,6 @@ AMENITIES = [
     "Balcony", "Smoke alarm", "Carbon monoxide alarm",
 ]
 
-MODEL_R2 = "70%"
 AMSTERDAM_LAT, AMSTERDAM_LON = 52.3676, 4.9041
 
 st.set_page_config(
@@ -329,10 +328,9 @@ if "last_price" in st.session_state:
         """,
         unsafe_allow_html=True,
     )
-    k1, k2, k3 = st.columns(3)
+    k1, k2 = st.columns(2)
     k1.metric("Estimated Price", f"€{price:,.2f}")
     k2.metric("Price per Guest", f"€{per_guest:,.2f}")
-    k3.metric("Model Accuracy (R²)", MODEL_R2)
 else:
     st.markdown(
         """
