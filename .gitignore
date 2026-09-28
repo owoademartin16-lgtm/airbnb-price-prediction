@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Streamlit secrets (never commit credentials)
+.streamlit/secrets.toml
+
+# OS / system files
+.DS_Store
+Thumbs.db
+desktop.ini
